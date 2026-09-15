@@ -121,7 +121,7 @@ public abstract class BacNetClientBase implements BacNetClient {
         BlockingDiscoveryCallable callable = new BlockingDiscoveryCallable(discoveryListener, deviceFactory, localDevice, timeout, timeout / 10);
         ForwardingAdapter listener = new ForwardingAdapter(executor, callable);
         localDevice.getEventHandler().addListener(listener);
-        localDevice.sendGlobalBroadcast(request);
+        localDevice.sendGlobalBroadcast(new WhoIsRequest());
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return callable.call();

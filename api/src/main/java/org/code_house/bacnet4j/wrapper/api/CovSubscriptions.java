@@ -12,7 +12,10 @@ import com.serotonin.bacnet4j.exception.BACnetException;
 import com.serotonin.bacnet4j.service.confirmed.SubscribeCOVRequest;
 import com.serotonin.bacnet4j.type.primitive.Boolean;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.code_house.bacnet4j.wrapper.api.util.ForwardingAdapter;
@@ -23,6 +26,9 @@ import org.code_house.bacnet4j.wrapper.api.util.ForwardingAdapter;
 final class CovSubscriptions {
 
     private static final AtomicInteger PROCESS_IDS = new AtomicInteger(1);
+    private static final Object ACTIVE_LOCK = new Object();
+    private static final IdentityHashMap<BacNetClientBase, Set<DefaultCovSubscription>> ACTIVE =
+        new IdentityHashMap<>();
 
     private CovSubscriptions() {
     }
@@ -55,7 +61,69 @@ final class CovSubscriptions {
             throw new BacNetClientException("Unable to subscribe to COV for object " + object, e);
         }
 
-        return new DefaultCovSubscription(client, object, processId, lifetime, confirmed, request, forwardingAdapter);
+        DefaultCovSubscription subscription = new DefaultCovSubscription(
+            client, object, processId, lifetime, confirmed, request, forwardingAdapter);
+        register(subscription);
+        return subscription;
+    }
+
+    /**
+     * Close every active COV subscription owned by a client.
+     *
+     * <p>The first cancellation failure is rethrown after all subscriptions have had a chance
+     * to clean up their local event listeners. This is intended for client shutdown where a
+     * single unreachable BACnet device must not prevent cleanup of the remaining subscriptions.</p>
+     */
+    static void closeAll(BacNetClientBase client) {
+        DefaultCovSubscription[] subscriptions;
+        synchronized (ACTIVE_LOCK) {
+            Set<DefaultCovSubscription> active = ACTIVE.get(client);
+            if (active == null || active.isEmpty()) {
+                return;
+            }
+            subscriptions = active.toArray(new DefaultCovSubscription[0]);
+        }
+
+        BacNetClientException firstFailure = null;
+        for (DefaultCovSubscription subscription : subscriptions) {
+            try {
+                subscription.close();
+            } catch (BacNetClientException e) {
+                if (firstFailure == null) {
+                    firstFailure = e;
+                }
+            }
+        }
+        if (firstFailure != null) {
+            throw firstFailure;
+        }
+    }
+
+    static int activeCount(BacNetClientBase client) {
+        synchronized (ACTIVE_LOCK) {
+            Set<DefaultCovSubscription> active = ACTIVE.get(client);
+            return active == null ? 0 : active.size();
+        }
+    }
+
+    private static void register(DefaultCovSubscription subscription) {
+        synchronized (ACTIVE_LOCK) {
+            ACTIVE.computeIfAbsent(subscription.client,
+                ignored -> Collections.newSetFromMap(new IdentityHashMap<>())).add(subscription);
+        }
+    }
+
+    private static void unregister(DefaultCovSubscription subscription) {
+        synchronized (ACTIVE_LOCK) {
+            Set<DefaultCovSubscription> active = ACTIVE.get(subscription.client);
+            if (active == null) {
+                return;
+            }
+            active.remove(subscription);
+            if (active.isEmpty()) {
+                ACTIVE.remove(subscription.client);
+            }
+        }
     }
 
     private static int nextProcessId() {
@@ -117,6 +185,7 @@ final class CovSubscriptions {
                 throw new BacNetClientException("Unable to cancel COV subscription for object " + object, e);
             } finally {
                 client.localDevice.getEventHandler().removeListener(listener);
+                unregister(this);
             }
         }
     }

@@ -172,7 +172,25 @@ final class CovSubscriptions {
         }
 
         @Override
-        public void close() {
+        public synchronized void renew() {
+            if (closed.get()) {
+                throw new BacNetClientException("Unable to renew closed COV subscription for object " + object);
+            }
+
+            try {
+                client.localDevice.send(object.getDevice().getBacNet4jAddress(), request).get();
+            } catch (BACnetException e) {
+                throw new BacNetClientException("Unable to renew COV subscription for object " + object, e);
+            }
+        }
+
+        @Override
+        public boolean isClosed() {
+            return closed.get();
+        }
+
+        @Override
+        public synchronized void close() {
             if (!closed.compareAndSet(false, true)) {
                 return;
             }

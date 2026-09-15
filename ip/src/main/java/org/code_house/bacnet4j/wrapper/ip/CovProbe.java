@@ -10,9 +10,11 @@ package org.code_house.bacnet4j.wrapper.ip;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.serotonin.bacnet4j.type.constructed.ServicesSupported;
 import org.code_house.bacnet4j.wrapper.api.BacNetClient;
@@ -93,6 +95,18 @@ public final class CovProbe {
                         args.length >= 8 ? Integer.parseInt(args[7]) : 30,
                         args.length >= 9 ? Integer.parseInt(args[8]) : 20,
                         args.length >= 10 ? Integer.parseInt(args[9]) : 20);
+                    break;
+                case "cov-restart":
+                    if (args.length < 7 || args.length > 9) {
+                        usage();
+                        System.exit(2);
+                    }
+                    runCovRestart(client,
+                        Integer.parseInt(args[4]),
+                        Type.valueOf(args[5].toUpperCase()),
+                        Integer.parseInt(args[6]),
+                        args.length >= 8 ? Integer.parseInt(args[7]) : 300,
+                        args.length >= 9 ? Integer.parseInt(args[8]) : 30);
                     break;
                 default:
                     usage();
@@ -241,6 +255,63 @@ public final class CovProbe {
         System.out.println("COV subscription closed after renewal test.");
     }
 
+    private static void runCovRestart(BacNetClient client, int targetDeviceId, Type objectType,
+            int objectInstance, int lifetime, int waitAfterRenewSeconds) throws InterruptedException {
+        if (lifetime <= 0) {
+            throw new IllegalArgumentException("lifetime must be greater than zero");
+        }
+        if (waitAfterRenewSeconds <= 0) {
+            throw new IllegalArgumentException("waitAfterRenewSeconds must be greater than zero");
+        }
+
+        BacNetObject object = findObject(client, targetDeviceId, objectType, objectInstance);
+        System.out.println("Monitoring restart recovery: " + object + " name=\"" + object.getName() + "\"");
+        Object initialValue = client.getPresentValue(object, encodable -> encodable);
+        System.out.println("Initial Present_Value: " + initialValue);
+
+        CountDownLatch initialNotification = new CountDownLatch(1);
+        CountDownLatch notificationAfterRenew = new CountDownLatch(1);
+        AtomicInteger notificationCount = new AtomicInteger();
+
+        try (CovSubscription subscription = client.subscribeCov(object, lifetime, false,
+                (changedObject, presentValue, timeRemaining) -> {
+                    int count = notificationCount.incrementAndGet();
+                    System.out.println("COV[" + count + "]: " + changedObject + " Present_Value=" + presentValue
+                        + " timeRemaining=" + timeRemaining);
+                    initialNotification.countDown();
+                    if (count > 1) {
+                        notificationAfterRenew.countDown();
+                    }
+                })) {
+            int processId = subscription.getSubscriberProcessIdentifier();
+            System.out.println("COV subscription active: processId=" + processId
+                + " lifetime=" + subscription.getLifetime() + " confirmed=" + subscription.isConfirmed());
+
+            boolean received = initialNotification.await(10, TimeUnit.SECONDS);
+            System.out.println(received ? "Initial COV notification received." : "No initial COV notification within 10 seconds.");
+            System.out.println("Local subscription before restart: processId=" + processId
+                + " closed=" + subscription.isClosed());
+            System.out.println();
+            System.out.println("Restart the BACnet device now. Wait until it is fully online, then press Enter to renew the same subscription.");
+
+            Scanner scanner = new Scanner(System.in);
+            scanner.nextLine();
+
+            System.out.println("Local subscription after device restart, before renew: processId=" + processId
+                + " closed=" + subscription.isClosed());
+            System.out.println("Renewing COV subscription after device restart: processId=" + processId);
+            subscription.renew();
+            System.out.println("Renew request accepted: processId=" + subscription.getSubscriberProcessIdentifier()
+                + " lifetime=" + subscription.getLifetime() + " closed=" + subscription.isClosed());
+
+            boolean recovered = notificationAfterRenew.await(waitAfterRenewSeconds, TimeUnit.SECONDS);
+            System.out.println(recovered
+                ? "COV notification received after restart and renew: subscription recovered."
+                : "No COV notification received after restart and renew within wait window.");
+        }
+        System.out.println("COV restart recovery test finished; subscription closed.");
+    }
+
     private static BacNetObject findObject(BacNetClient client, int targetDeviceId, Type objectType, int objectInstance) {
         Device target = findDevice(client, targetDeviceId);
         System.out.println("Discovered target: " + target);
@@ -274,5 +345,6 @@ public final class CovProbe {
         System.err.println("  CovProbe cov-info  <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance>");
         System.err.println("  CovProbe cov       <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
         System.err.println("  CovProbe cov-renew <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [renewAfterSeconds] [waitAfterRenewSeconds]");
+        System.err.println("  CovProbe cov-restart <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitAfterRenewSeconds]");
     }
 }

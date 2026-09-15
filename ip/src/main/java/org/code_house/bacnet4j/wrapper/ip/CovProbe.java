@@ -14,6 +14,7 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.serotonin.bacnet4j.type.constructed.ServicesSupported;
@@ -270,7 +271,8 @@ public final class CovProbe {
         System.out.println("Initial Present_Value: " + initialValue);
 
         CountDownLatch initialNotification = new CountDownLatch(1);
-        CountDownLatch notificationAfterRenew = new CountDownLatch(1);
+        CountDownLatch notificationAfterRecovery = new CountDownLatch(1);
+        AtomicBoolean recoveryArmed = new AtomicBoolean();
         AtomicInteger notificationCount = new AtomicInteger();
 
         try (CovSubscription subscription = client.subscribeCov(object, lifetime, false,
@@ -279,8 +281,8 @@ public final class CovProbe {
                     System.out.println("COV[" + count + "]: " + changedObject + " Present_Value=" + presentValue
                         + " timeRemaining=" + timeRemaining);
                     initialNotification.countDown();
-                    if (count > 1) {
-                        notificationAfterRenew.countDown();
+                    if (recoveryArmed.get()) {
+                        notificationAfterRecovery.countDown();
                     }
                 })) {
             int processId = subscription.getSubscriberProcessIdentifier();
@@ -289,27 +291,44 @@ public final class CovProbe {
 
             boolean received = initialNotification.await(10, TimeUnit.SECONDS);
             System.out.println(received ? "Initial COV notification received." : "No initial COV notification within 10 seconds.");
-            System.out.println("Local subscription before restart: processId=" + processId
+            System.out.println("Local subscription before outage: processId=" + processId
                 + " closed=" + subscription.isClosed());
-            System.out.println();
-            System.out.println("Restart the BACnet device now. Wait until it is fully online, then press Enter to renew the same subscription.");
 
             Scanner scanner = new Scanner(System.in);
+            System.out.println();
+            System.out.println("POWER OFF the BACnet device now. Keep it off, then press Enter to attempt renew while it is offline.");
             scanner.nextLine();
 
-            System.out.println("Local subscription after device restart, before renew: processId=" + processId
+            System.out.println("Attempting renew while device is OFFLINE: processId=" + processId);
+            boolean offlineRenewFailed = false;
+            try {
+                subscription.renew();
+                System.out.println("WARNING: renew succeeded while the device was expected to be offline.");
+            } catch (RuntimeException e) {
+                offlineRenewFailed = true;
+                System.out.println("Expected renew failure while offline: " + e.getClass().getSimpleName()
+                    + ": " + e.getMessage());
+            }
+            System.out.println("Local subscription after offline renew attempt: processId=" + processId
                 + " closed=" + subscription.isClosed());
-            System.out.println("Renewing COV subscription after device restart: processId=" + processId);
+
+            System.out.println();
+            System.out.println("POWER ON the BACnet device now. Wait until BACnet is fully online, then press Enter to retry renew on the SAME subscription.");
+            scanner.nextLine();
+
+            recoveryArmed.set(true);
+            System.out.println("Retrying renew after device recovery: processId=" + processId
+                + " previousOfflineRenewFailed=" + offlineRenewFailed);
             subscription.renew();
-            System.out.println("Renew request accepted: processId=" + subscription.getSubscriberProcessIdentifier()
+            System.out.println("Recovery renew accepted: processId=" + subscription.getSubscriberProcessIdentifier()
                 + " lifetime=" + subscription.getLifetime() + " closed=" + subscription.isClosed());
 
-            boolean recovered = notificationAfterRenew.await(waitAfterRenewSeconds, TimeUnit.SECONDS);
+            boolean recovered = notificationAfterRecovery.await(waitAfterRenewSeconds, TimeUnit.SECONDS);
             System.out.println(recovered
-                ? "COV notification received after restart and renew: subscription recovered."
-                : "No COV notification received after restart and renew within wait window.");
+                ? "Fresh COV notification received after recovery renew: subscription recovered."
+                : "No fresh COV notification received after recovery renew within wait window.");
         }
-        System.out.println("COV restart recovery test finished; subscription closed.");
+        System.out.println("COV outage/recovery test finished; subscription closed.");
     }
 
     private static BacNetObject findObject(BacNetClient client, int targetDeviceId, Type objectType, int objectInstance) {

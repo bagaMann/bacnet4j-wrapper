@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import com.serotonin.bacnet4j.type.constructed.ServicesSupported;
 import org.code_house.bacnet4j.wrapper.api.BacNetClient;
 import org.code_house.bacnet4j.wrapper.api.BacNetObject;
 import org.code_house.bacnet4j.wrapper.api.CovSubscription;
@@ -53,6 +54,10 @@ public final class CovProbe {
                     requireArgs(args, 4);
                     discover(client);
                     break;
+                case "services":
+                    requireArgs(args, 5);
+                    showServices(client, Integer.parseInt(args[4]));
+                    break;
                 case "objects":
                     requireArgs(args, 5);
                     listObjects(client, Integer.parseInt(args[4]));
@@ -90,6 +95,30 @@ public final class CovProbe {
                 + " name=\"" + device.getName() + "\" model=\"" + device.getModelName()
                 + "\" vendor=\"" + device.getVendorName() + "\" network=" + device.getNetworkNumber()
                 + " address=" + device));
+    }
+
+    private static void showServices(BacNetClient client, int targetDeviceId) {
+        Device target = findDevice(client, targetDeviceId);
+        BacNetObject deviceObject = new BacNetObject(target, targetDeviceId, Type.DEVICE);
+        Object value = client.getObjectPropertyValue(deviceObject, "protocol-services-supported", encodable -> encodable);
+        if (!(value instanceof ServicesSupported)) {
+            throw new IllegalStateException("Unexpected protocol-services-supported value: " + value);
+        }
+
+        ServicesSupported services = (ServicesSupported) value;
+        System.out.println("Device " + targetDeviceId + " protocol-services-supported:");
+        printService("readProperty", services.isReadProperty());
+        printService("readPropertyMultiple", services.isReadPropertyMultiple());
+        printService("writeProperty", services.isWriteProperty());
+        printService("writePropertyMultiple", services.isWritePropertyMultiple());
+        printService("subscribeCOV", services.isSubscribeCov());
+        printService("subscribeCOVProperty", services.isSubscribeCovProperty());
+        printService("confirmedCOVNotification", services.isConfirmedCovNotification());
+        printService("unconfirmedCOVNotification", services.isUnconfirmedCovNotification());
+    }
+
+    private static void printService(String name, boolean supported) {
+        System.out.printf("  %-28s %s%n", name, supported ? "SUPPORTED" : "not supported");
     }
 
     private static void listObjects(BacNetClient client, int targetDeviceId) {
@@ -156,6 +185,7 @@ public final class CovProbe {
     private static void usage() {
         System.err.println("Usage:");
         System.err.println("  CovProbe discover <localIp> <broadcast> <localDeviceId>");
+        System.err.println("  CovProbe services <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
         System.err.println("  CovProbe objects  <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
         System.err.println("  CovProbe cov      <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
     }

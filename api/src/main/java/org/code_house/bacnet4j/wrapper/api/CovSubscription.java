@@ -22,6 +22,17 @@ public interface CovSubscription extends AutoCloseable {
     boolean isConfirmed();
 
     /**
+     * Renew the remote COV subscription using the same subscriber process identifier,
+     * monitored object, confirmation mode and lifetime.
+     */
+    void renew();
+
+    /**
+     * Return whether this subscription has been closed locally.
+     */
+    boolean isClosed();
+
+    /**
      * Cancel the remote COV subscription and detach its local listener.
      */
     @Override

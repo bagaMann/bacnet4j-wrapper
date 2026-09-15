@@ -7,7 +7,6 @@ import com.serotonin.bacnet4j.type.Encodable;
 import com.serotonin.bacnet4j.type.constructed.PropertyValue;
 import com.serotonin.bacnet4j.type.constructed.SequenceOf;
 import com.serotonin.bacnet4j.type.enumerated.PropertyIdentifier;
-import com.serotonin.bacnet4j.type.primitive.ObjectIdentifier;
 import com.serotonin.bacnet4j.type.primitive.Real;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,7 +17,7 @@ public class CovEventAdapterTest {
 
     @Test
     public void forwardsPresentValueForMatchingSubscription() {
-        Device device = new Device(100, null, null, null, null, false);
+        Device device = new Device(100, new byte[] {1, 2, 3, 4, 0, 1}, 0);
         BacNetObject object = new BacNetObject(device, 7, Type.ANALOG_INPUT, "AI7", "", null);
         AtomicInteger calls = new AtomicInteger();
         AtomicReference<Encodable> value = new AtomicReference<>();
@@ -39,7 +38,7 @@ public class CovEventAdapterTest {
 
     @Test
     public void ignoresDifferentSubscriberProcessIdentifier() {
-        Device device = new Device(100, null, null, null, null, false);
+        Device device = new Device(100, new byte[] {1, 2, 3, 4, 0, 1}, 0);
         BacNetObject object = new BacNetObject(device, 7, Type.ANALOG_INPUT, "AI7", "", null);
         AtomicReference<Encodable> value = new AtomicReference<>();
         CovEventAdapter adapter = new CovEventAdapter(42, object, (source, presentValue, remaining) -> value.set(presentValue));

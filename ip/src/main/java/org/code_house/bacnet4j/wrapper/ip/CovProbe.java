@@ -62,6 +62,13 @@ public final class CovProbe {
                     requireArgs(args, 5);
                     listObjects(client, Integer.parseInt(args[4]));
                     break;
+                case "cov-info":
+                    requireArgs(args, 7);
+                    showCovInfo(client,
+                        Integer.parseInt(args[4]),
+                        Type.valueOf(args[5].toUpperCase()),
+                        Integer.parseInt(args[6]));
+                    break;
                 case "cov":
                     if (args.length < 7 || args.length > 9) {
                         usage();
@@ -147,6 +154,17 @@ public final class CovProbe {
                 + " id=" + object.getId() + " name=\"" + object.getName()
                 + "\" description=\"" + object.getDescription() + "\" units=\"" + object.getUnits() + "\""));
         System.out.println("Objects: " + objects.size());
+    }
+
+    private static void showCovInfo(BacNetClient client, int targetDeviceId, Type objectType, int objectInstance) {
+        BacNetObject object = findObject(client, targetDeviceId, objectType, objectInstance);
+        Object presentValue = client.getPresentValue(object, encodable -> encodable);
+        Object covIncrement = client.getObjectPropertyValue(object, "cov-increment", encodable -> encodable);
+
+        System.out.println("COV object: " + object + " name=\"" + object.getName() + "\"");
+        System.out.println("Present_Value: " + presentValue);
+        System.out.println("COV_Increment: " + covIncrement);
+        System.out.println("Units: " + object.getUnits());
     }
 
     private static void runCov(BacNetClient client, int targetDeviceId, Type objectType,
@@ -253,6 +271,7 @@ public final class CovProbe {
         System.err.println("  CovProbe discover  <localIp> <broadcast> <localDeviceId>");
         System.err.println("  CovProbe services  <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
         System.err.println("  CovProbe objects   <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
+        System.err.println("  CovProbe cov-info  <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance>");
         System.err.println("  CovProbe cov       <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
         System.err.println("  CovProbe cov-renew <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [renewAfterSeconds] [waitAfterRenewSeconds]");
     }

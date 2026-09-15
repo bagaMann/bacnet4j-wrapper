@@ -35,27 +35,8 @@ public interface BacNetClient {
 
     void stop();
 
-    /**
-     * No timeout variant of discovery.
-     *
-     * This operation will send a discovery packet and wait for results as long as future is not cancelled.
-     *
-     * @param discoveryListener Listener which will get information about discovery devices.
-     * @return Future which allows to stop discovery.
-     */
     CompletableFuture<Void> listenForDevices(DeviceDiscoveryListener discoveryListener);
 
-    /**
-     * No timeout variant of discovery with range options.
-     *
-     * This operation will send a discovery packet and wait for results as long as future is not cancelled.
-     * Discovery request will contain instance limits.
-     *
-     * @param discoveryListener Listener which will get information about discovery devices.
-     * @param min Optional minimum device number.
-     * @param max Optional maximum device number.
-     * @return Future which allows to stop discovery.
-     */
     CompletableFuture<Void> listenForDevices(DeviceDiscoveryListener discoveryListener, Integer min, Integer max);
 
     CompletableFuture<Set<Device>> doDiscoverDevices(DeviceDiscoveryListener discoveryListener, long timeout);
@@ -64,12 +45,6 @@ public interface BacNetClient {
 
     Set<Device> discoverDevices(DeviceDiscoveryListener discoveryListener, long timeout);
 
-    /**
-     * This method is deprecated in favor of properly named {{@link #getDeviceObjects(Device)}}.
-     *
-     * @param device Device.
-     * @return List of bacnet objects (properties).
-     */
     @Deprecated
     default List<Property> getDeviceProperties(Device device) {
         return getDeviceObjects(device).stream()
@@ -77,21 +52,8 @@ public interface BacNetClient {
             .collect(Collectors.toList());
     }
 
-    /**
-     * Retrieve device objects.
-     *
-     * @param device Device.
-     * @return Object.
-     */
     List<BacNetObject> getDeviceObjects(Device device);
 
-    /**
-     * Retrieves present values for given properties.
-     *
-     * @param properties Property list.
-     * @return Present values.
-     * @deprecated Please migrate code usage to {{@link #getPresentValues(List)}}
-     */
     @Deprecated
     default List<Object> getPropertyValues(List<Property> properties) {
         return getPresentValues(properties.stream()
@@ -100,20 +62,13 @@ public interface BacNetClient {
         );
     }
 
-
-    /**
-     * Retrieve list with present values of passed objects.
-     *
-     * @param objects
-     * @return
-     */
     List<java.lang.Object> getPresentValues(List<BacNetObject> objects);
 
-    // fetch present value
     @Deprecated
     default <T> T getPropertyValue(Property property, BacNetToJavaConverter<T> converter) {
         return getPresentValue(property.toBacNetObject(), converter);
     }
+
     <T> T getPresentValue(BacNetObject object, BacNetToJavaConverter<T> converter);
 
     @Deprecated
@@ -144,4 +99,14 @@ public interface BacNetClient {
 
     List<Object> getObjectAttributeValues(BacNetObject object, List<String> properties);
 
+    /**
+     * Subscribe to Change of Value notifications for a BACnet object.
+     *
+     * @param object object to monitor
+     * @param lifetime requested subscription lifetime in seconds; must be greater than zero
+     * @param confirmed request confirmed COV notifications when true
+     * @param listener notification listener
+     * @return subscription handle; closing it cancels the subscription
+     */
+    CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener);
 }

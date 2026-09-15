@@ -38,11 +38,15 @@ public final class CovProbe {
         String broadcast = args[2];
         int localDeviceId = Integer.parseInt(args[3]);
 
-        BacNetClient client = new BacNetIpClient(localIp, broadcast, localDeviceId);
+        // Bind the BACnet/IP socket to the wildcard address. Some BACnet devices, including
+        // the IQ3 used by this probe, answer Who-Is with a directed-broadcast I-Am. A socket
+        // bound only to the interface's unicast address does not receive that datagram on Linux.
+        // The broadcast argument still selects the BACnet/IP network and /24 broadcast target.
+        BacNetClient client = new BacNetIpClient(broadcast, localDeviceId);
         client.start();
         try {
-            System.out.println("BACnet/IP client started as device " + localDeviceId + " on " + localIp
-                + " broadcast " + broadcast);
+            System.out.println("BACnet/IP client started as device " + localDeviceId
+                + " (requested interface " + localIp + ", broadcast " + broadcast + ")");
 
             switch (mode) {
                 case "discover":

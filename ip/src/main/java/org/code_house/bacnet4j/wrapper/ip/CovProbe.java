@@ -74,6 +74,19 @@ public final class CovProbe {
                         args.length >= 8 ? Integer.parseInt(args[7]) : 120,
                         args.length >= 9 ? Integer.parseInt(args[8]) : 60);
                     break;
+                case "cov-renew":
+                    if (args.length < 7 || args.length > 10) {
+                        usage();
+                        System.exit(2);
+                    }
+                    runCovRenew(client,
+                        Integer.parseInt(args[4]),
+                        Type.valueOf(args[5].toUpperCase()),
+                        Integer.parseInt(args[6]),
+                        args.length >= 8 ? Integer.parseInt(args[7]) : 30,
+                        args.length >= 9 ? Integer.parseInt(args[8]) : 20,
+                        args.length >= 10 ? Integer.parseInt(args[9]) : 20);
+                    break;
                 default:
                     usage();
                     System.exit(2);
@@ -138,15 +151,7 @@ public final class CovProbe {
 
     private static void runCov(BacNetClient client, int targetDeviceId, Type objectType,
             int objectInstance, int lifetime, int waitSeconds) throws InterruptedException {
-        Device target = findDevice(client, targetDeviceId);
-        System.out.println("Discovered target: " + target);
-
-        List<BacNetObject> objects = client.getDeviceObjects(target);
-        BacNetObject object = objects.stream()
-            .filter(candidate -> candidate.getType() == objectType)
-            .filter(candidate -> candidate.getId() == objectInstance)
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("Object " + objectType + ":" + objectInstance + " was not found"));
+        BacNetObject object = findObject(client, targetDeviceId, objectType, objectInstance);
 
         System.out.println("Monitoring: " + object + " name=\"" + object.getName() + "\"");
         Object initialValue = client.getPresentValue(object, encodable -> encodable);
@@ -167,6 +172,67 @@ public final class CovProbe {
         System.out.println("COV subscription closed.");
     }
 
+    private static void runCovRenew(BacNetClient client, int targetDeviceId, Type objectType,
+            int objectInstance, int lifetime, int renewAfterSeconds, int waitAfterRenewSeconds)
+            throws InterruptedException {
+        if (renewAfterSeconds <= 0 || renewAfterSeconds >= lifetime) {
+            throw new IllegalArgumentException("renewAfterSeconds must be greater than zero and less than lifetime");
+        }
+        if (waitAfterRenewSeconds < 0) {
+            throw new IllegalArgumentException("waitAfterRenewSeconds must not be negative");
+        }
+
+        BacNetObject object = findObject(client, targetDeviceId, objectType, objectInstance);
+        System.out.println("Monitoring renewal: " + object + " name=\"" + object.getName() + "\"");
+        Object initialValue = client.getPresentValue(object, encodable -> encodable);
+        System.out.println("Initial Present_Value: " + initialValue);
+
+        CountDownLatch initialNotification = new CountDownLatch(1);
+        try (CovSubscription subscription = client.subscribeCov(object, lifetime, false,
+                (changedObject, presentValue, timeRemaining) -> {
+                    System.out.println("COV: " + changedObject + " Present_Value=" + presentValue
+                        + " timeRemaining=" + timeRemaining);
+                    initialNotification.countDown();
+                })) {
+            int processId = subscription.getSubscriberProcessIdentifier();
+            System.out.println("COV subscription active: processId=" + processId
+                + " lifetime=" + subscription.getLifetime() + " confirmed=" + subscription.isConfirmed());
+
+            boolean received = initialNotification.await(Math.min(renewAfterSeconds, 5), TimeUnit.SECONDS);
+            System.out.println(received ? "Initial COV notification received." : "No initial COV notification within probe window.");
+
+            long remainingBeforeRenewMs = TimeUnit.SECONDS.toMillis(renewAfterSeconds)
+                - Math.min(TimeUnit.SECONDS.toMillis(renewAfterSeconds), TimeUnit.SECONDS.toMillis(5));
+            if (received) {
+                remainingBeforeRenewMs = TimeUnit.SECONDS.toMillis(Math.max(0, renewAfterSeconds - 1));
+            }
+            if (remainingBeforeRenewMs > 0) {
+                Thread.sleep(remainingBeforeRenewMs);
+            }
+
+            System.out.println("Renewing COV subscription: processId=" + processId);
+            subscription.renew();
+            System.out.println("COV subscription renewed: processId=" + subscription.getSubscriberProcessIdentifier()
+                + " lifetime=" + subscription.getLifetime() + " closed=" + subscription.isClosed());
+
+            if (waitAfterRenewSeconds > 0) {
+                System.out.println("Waiting " + waitAfterRenewSeconds + " seconds after renewal...");
+                Thread.sleep(TimeUnit.SECONDS.toMillis(waitAfterRenewSeconds));
+            }
+        }
+        System.out.println("COV subscription closed after renewal test.");
+    }
+
+    private static BacNetObject findObject(BacNetClient client, int targetDeviceId, Type objectType, int objectInstance) {
+        Device target = findDevice(client, targetDeviceId);
+        System.out.println("Discovered target: " + target);
+        return client.getDeviceObjects(target).stream()
+            .filter(candidate -> candidate.getType() == objectType)
+            .filter(candidate -> candidate.getId() == objectInstance)
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("Object " + objectType + ":" + objectInstance + " was not found"));
+    }
+
     private static Device findDevice(BacNetClient client, int targetDeviceId) {
         System.out.println("Discovering target device " + targetDeviceId + "...");
         return client.discoverDevices(DISCOVERY_TIMEOUT_MS).stream()
@@ -184,9 +250,10 @@ public final class CovProbe {
 
     private static void usage() {
         System.err.println("Usage:");
-        System.err.println("  CovProbe discover <localIp> <broadcast> <localDeviceId>");
-        System.err.println("  CovProbe services <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
-        System.err.println("  CovProbe objects  <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
-        System.err.println("  CovProbe cov      <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
+        System.err.println("  CovProbe discover  <localIp> <broadcast> <localDeviceId>");
+        System.err.println("  CovProbe services  <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
+        System.err.println("  CovProbe objects   <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
+        System.err.println("  CovProbe cov       <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
+        System.err.println("  CovProbe cov-renew <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [renewAfterSeconds] [waitAfterRenewSeconds]");
     }
 }

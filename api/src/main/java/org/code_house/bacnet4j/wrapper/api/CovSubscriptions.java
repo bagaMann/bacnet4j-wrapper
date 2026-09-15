@@ -174,7 +174,9 @@ final class CovSubscriptions {
         @Override
         public synchronized void renew() {
             if (closed.get()) {
-                throw new BacNetClientException("Unable to renew closed COV subscription for object " + object);
+                throw new BacNetClientException(
+                    "Unable to renew closed COV subscription for object " + object,
+                    new IllegalStateException("COV subscription is closed"));
             }
 
             try {

@@ -97,10 +97,5 @@ public interface BacNetClient {
      * @param listener notification listener
      * @return subscription handle; closing it cancels the remote subscription
      */
-    default CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener) {
-        if (!(this instanceof BacNetClientBase)) {
-            throw new UnsupportedOperationException("COV subscriptions require a BacNetClientBase implementation");
-        }
-        return CovSubscriptions.subscribe((BacNetClientBase) this, object, lifetime, confirmed, listener);
-    }
+    CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener);
 }

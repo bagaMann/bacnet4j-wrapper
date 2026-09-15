@@ -12,10 +12,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Foobar; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 package org.code_house.bacnet4j.wrapper.api;
 
@@ -25,24 +21,19 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 /**
- * Definition of bacnet client
+ * Definition of bacnet client.
  *
  * @author Łukasz Dywicki &lt;luke@code-house.org&gt;
  */
 public interface BacNetClient {
 
     void start();
-
     void stop();
 
     CompletableFuture<Void> listenForDevices(DeviceDiscoveryListener discoveryListener);
-
     CompletableFuture<Void> listenForDevices(DeviceDiscoveryListener discoveryListener, Integer min, Integer max);
-
     CompletableFuture<Set<Device>> doDiscoverDevices(DeviceDiscoveryListener discoveryListener, long timeout);
-
     Set<Device> discoverDevices(long timeout);
-
     Set<Device> discoverDevices(DeviceDiscoveryListener discoveryListener, long timeout);
 
     @Deprecated
@@ -58,8 +49,7 @@ public interface BacNetClient {
     default List<Object> getPropertyValues(List<Property> properties) {
         return getPresentValues(properties.stream()
             .map(Property::toBacNetObject)
-            .collect(Collectors.toList())
-        );
+            .collect(Collectors.toList()));
     }
 
     List<java.lang.Object> getPresentValues(List<BacNetObject> objects);
@@ -96,7 +86,6 @@ public interface BacNetClient {
 
     List<String> getObjectPropertyNames(BacNetObject object);
     <T> T getObjectPropertyValue(BacNetObject object, String attribute, BacNetToJavaConverter<T> converter);
-
     List<Object> getObjectAttributeValues(BacNetObject object, List<String> properties);
 
     /**
@@ -106,7 +95,12 @@ public interface BacNetClient {
      * @param lifetime requested subscription lifetime in seconds; must be greater than zero
      * @param confirmed request confirmed COV notifications when true
      * @param listener notification listener
-     * @return subscription handle; closing it cancels the subscription
+     * @return subscription handle; closing it cancels the remote subscription
      */
-    CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener);
+    default CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener) {
+        if (!(this instanceof BacNetClientBase)) {
+            throw new UnsupportedOperationException("COV subscriptions require a BacNetClientBase implementation");
+        }
+        return CovSubscriptions.subscribe((BacNetClientBase) this, object, lifetime, confirmed, listener);
+    }
 }

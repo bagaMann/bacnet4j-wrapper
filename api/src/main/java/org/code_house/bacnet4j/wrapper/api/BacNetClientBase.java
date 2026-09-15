@@ -463,6 +463,6 @@ public abstract class BacNetClientBase implements BacNetClient {
             }
         }
 
-        return new BacNetObject(device, id.getInstanceNumber(), Type.from(id.getObjectType()), presentValue, units, name, description);
+        return new BacNetObject(device, id.getInstanceNumber(), Type.valueOf(id.getObjectType()), presentValue, units, name, description);
     }
 }

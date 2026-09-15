@@ -68,8 +68,19 @@ public abstract class BacNetClientBase implements BacNetClient {
 
     @Override
     public void stop() {
-        executor.shutdown();
-        localDevice.terminate();
+        try {
+            CovSubscriptions.closeAll(this);
+        } catch (BacNetClientException e) {
+            logger.warn("Unable to cancel one or more COV subscriptions during client shutdown", e);
+        } finally {
+            executor.shutdown();
+            localDevice.terminate();
+        }
+    }
+
+    @Override
+    public CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener) {
+        return CovSubscriptions.subscribe(this, object, lifetime, confirmed, listener);
     }
 
     @Override
@@ -386,47 +397,72 @@ public abstract class BacNetClientBase implements BacNetClient {
                     new ReadPropertyMultipleRequest(new SequenceOf<>(specs))
                 ).get();
                 SequenceOf<ReadAccessResult> readAccessResults = propertyDescriptorAck.getListOfReadAccessResults();
-                return createObject(device, id.getInstanceNumber(), Type.valueOf(id.getObjectType()),
-                    readAccessResults
-                );
+                return createObject(device, id, readAccessResults);
             } catch (BACnetException e) {
-                throw new BacNetClientException("Unable to fetch property description", e);
+                logger.warn("Could not fetch property information using ReadPropertyMultiple, falling back to sequential reads.", e);
             }
         }
 
-        return createObjectSingleRead(device, id);
+        return createObject(device, id, null);
     }
 
-    private BacNetObject createObjectSingleRead(Device device, ObjectIdentifier id) {
-        Encodable presentValue = readOrNull(device, id, PropertyIdentifier.presentValue);
-        Encodable units = readOrNull(device, id, PropertyIdentifier.units);
-        Encodable objectName = readOrNull(device, id, PropertyIdentifier.objectName);
-        Encodable description = readOrNull(device, id, PropertyIdentifier.description);
-        if (presentValue == null && units == null && objectName == null && description == null) {
-            //throw new BacNetClientException("Could not construct object " + id + " for device " + device, new IllegalArgumentException());
-            return new BacNetObject(device, id.getInstanceNumber(), Type.valueOf(id.getObjectType()), null, null, null);
+    private BacNetObject createObject(Device device, ObjectIdentifier id, SequenceOf<ReadAccessResult> readAccessResults) {
+        BypassBacnetConverter converter = new BypassBacnetConverter();
+        Object presentValue = null;
+        String units = null;
+        String name = null;
+        String description = null;
+
+        if (readAccessResults != null) {
+            ReadAccessResult result = readAccessResults.get(0);
+            List<ReadAccessResult.Result> values = result.getListOfResults().getValues();
+            if (values.size() > 0 && values.get(0).getReadResult().getDatum() != null) {
+                presentValue = getJavaValue(values.get(0).getReadResult().getDatum(), converter);
+            }
+            if (values.size() > 1 && values.get(1).getReadResult().getDatum() != null) {
+                units = getJavaValue(values.get(1).getReadResult().getDatum(), converter).toString();
+            }
+            if (values.size() > 2 && values.get(2).getReadResult().getDatum() != null) {
+                name = getJavaValue(values.get(2).getReadResult().getDatum(), converter).toString();
+            }
+            if (values.size() > 3 && values.get(3).getReadResult().getDatum() != null) {
+                description = getJavaValue(values.get(3).getReadResult().getDatum(), converter).toString();
+            }
+        } else {
+            try {
+                ReadPropertyAck answer = localDevice.send(device.getBacNet4jAddress(),
+                    new ReadPropertyRequest(id, PropertyIdentifier.presentValue)
+                ).get();
+                presentValue = getJavaValue(answer.getValue(), converter);
+            } catch (BACnetException e) {
+                logger.trace("Could not read present value for {}", id, e);
+            }
+            try {
+                ReadPropertyAck answer = localDevice.send(device.getBacNet4jAddress(),
+                    new ReadPropertyRequest(id, PropertyIdentifier.units)
+                ).get();
+                units = getJavaValue(answer.getValue(), converter).toString();
+            } catch (BACnetException e) {
+                logger.trace("Could not read units for {}", id, e);
+            }
+            try {
+                ReadPropertyAck answer = localDevice.send(device.getBacNet4jAddress(),
+                    new ReadPropertyRequest(id, PropertyIdentifier.objectName)
+                ).get();
+                name = getJavaValue(answer.getValue(), converter).toString();
+            } catch (BACnetException e) {
+                logger.trace("Could not read object name for {}", id, e);
+            }
+            try {
+                ReadPropertyAck answer = localDevice.send(device.getBacNet4jAddress(),
+                    new ReadPropertyRequest(id, PropertyIdentifier.description)
+                ).get();
+                description = getJavaValue(answer.getValue(), converter).toString();
+            } catch (BACnetException e) {
+                logger.trace("Could not read description for {}", id, e);
+            }
         }
-        return new BacNetObject(
-            device, id.getInstanceNumber(), Type.valueOf(id.getObjectType()),
-            objectName == null ? "" : objectName.toString(),
-            description == null ? "" : description.toString(),
-            units == null ? null : units.toString()
-        );
+
+        return new BacNetObject(device, id.getInstanceNumber(), Type.from(id.getObjectType()), presentValue, units, name, description);
     }
-
-    protected abstract BacNetObject createObject(Device device, int instance, Type type, SequenceOf<ReadAccessResult> readAccessResults);
-
-    protected <T> T readOrNull(Device device, ObjectIdentifier object, PropertyIdentifier identifier) {
-        ObjectIdentifier id = new ObjectIdentifier(object.getObjectType(), object.getInstanceNumber());
-        try {
-            ReadPropertyAck presentValue = localDevice.send(device.getBacNet4jAddress(),
-                new ReadPropertyRequest(id, identifier)
-            ).get();
-            return (T) presentValue.getValue();
-        } catch (BACnetException e) {
-            logger.trace("Failed to retrieve property {} for device {} object {}", identifier, device, object, e);
-            return null;
-        }
-    }
-
 }

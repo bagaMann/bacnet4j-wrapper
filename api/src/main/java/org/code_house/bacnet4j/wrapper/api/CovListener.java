@@ -24,4 +24,17 @@ public interface CovListener {
      * @param timeRemaining subscription lifetime remaining as reported by the server, in seconds
      */
     void onCovNotification(BacNetObject object, Encodable presentValue, long timeRemaining);
+
+    /**
+     * Called when Status_Flags are included in a COV notification.
+     *
+     * <p>This is a default method so existing COV listeners remain source compatible.</p>
+     *
+     * @param object monitored BACnet object
+     * @param statusFlags current Status_Flags value
+     * @param timeRemaining subscription lifetime remaining as reported by the server, in seconds
+     */
+    default void onCovStatusFlags(BacNetObject object, Encodable statusFlags, long timeRemaining) {
+        // Optional notification component.
+    }
 }

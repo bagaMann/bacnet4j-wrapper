@@ -17,7 +17,7 @@ import com.serotonin.bacnet4j.type.primitive.ObjectIdentifier;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
 
 /**
- * Filters BACnet COV events for one subscription and forwards Present_Value.
+ * Filters BACnet COV events for one subscription and forwards COV values.
  */
 final class CovEventAdapter extends DeviceEventAdapter {
 
@@ -41,13 +41,19 @@ final class CovEventAdapter extends DeviceEventAdapter {
         }
 
         Encodable presentValue = null;
+        Encodable statusFlags = null;
         for (PropertyValue propertyValue : listOfValues) {
             if (PropertyIdentifier.presentValue.equals(propertyValue.getPropertyIdentifier())) {
                 presentValue = propertyValue.getValue();
-                break;
+            } else if (PropertyIdentifier.statusFlags.equals(propertyValue.getPropertyIdentifier())) {
+                statusFlags = propertyValue.getValue();
             }
         }
 
-        listener.onCovNotification(object, presentValue, timeRemaining.longValue());
+        long remaining = timeRemaining.longValue();
+        listener.onCovNotification(object, presentValue, remaining);
+        if (statusFlags != null) {
+            listener.onCovStatusFlags(object, statusFlags, remaining);
+        }
     }
 }

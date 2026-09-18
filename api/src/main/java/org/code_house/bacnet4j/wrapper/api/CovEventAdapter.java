@@ -42,18 +42,32 @@ final class CovEventAdapter extends DeviceEventAdapter {
 
         Encodable presentValue = null;
         Encodable statusFlags = null;
+        Encodable eventState = null;
+        Encodable outOfService = null;
         for (PropertyValue propertyValue : listOfValues) {
             if (PropertyIdentifier.presentValue.equals(propertyValue.getPropertyIdentifier())) {
                 presentValue = propertyValue.getValue();
             } else if (PropertyIdentifier.statusFlags.equals(propertyValue.getPropertyIdentifier())) {
                 statusFlags = propertyValue.getValue();
+            } else if (PropertyIdentifier.eventState.equals(propertyValue.getPropertyIdentifier())) {
+                eventState = propertyValue.getValue();
+            } else if (PropertyIdentifier.outOfService.equals(propertyValue.getPropertyIdentifier())) {
+                outOfService = propertyValue.getValue();
             }
         }
 
         long remaining = timeRemaining.longValue();
-        listener.onCovNotification(object, presentValue, remaining);
+        if (presentValue != null) {
+            listener.onCovNotification(object, presentValue, remaining);
+        }
         if (statusFlags != null) {
             listener.onCovStatusFlags(object, statusFlags, remaining);
+        }
+        if (eventState != null) {
+            listener.onCovEventState(object, eventState, remaining);
+        }
+        if (outOfService != null) {
+            listener.onCovOutOfService(object, outOfService, remaining);
         }
     }
 }

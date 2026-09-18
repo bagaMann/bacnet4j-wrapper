@@ -20,6 +20,7 @@
 package org.code_house.bacnet4j.wrapper.ip;
 
 import com.serotonin.bacnet4j.LocalDevice;
+import com.serotonin.bacnet4j.exception.BACnetException;
 import com.serotonin.bacnet4j.npdu.ip.IpNetwork;
 import com.serotonin.bacnet4j.npdu.ip.IpNetworkBuilder;
 import com.serotonin.bacnet4j.npdu.ip.IpNetworkUtils;
@@ -28,8 +29,11 @@ import com.serotonin.bacnet4j.type.constructed.ReadAccessResult;
 import com.serotonin.bacnet4j.type.constructed.ReadAccessResult.Result;
 import com.serotonin.bacnet4j.type.constructed.SequenceOf;
 import com.serotonin.bacnet4j.type.primitive.OctetString;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.code_house.bacnet4j.wrapper.api.BacNetClientBase;
@@ -91,10 +95,12 @@ public class BacNetIpClient extends BacNetClientBase {
     /**
      * Enable BBMD mode and configure its Broadcast Distribution Table.
      *
-     * <p>This method must be called after {@link #start()}, because BACnet4J resolves the actual
-     * local bind socket during network initialization. A concrete local bind address is required;
-     * wildcard 0.0.0.0 is intentionally rejected so the local BBMD entry is deterministic when a
-     * host has multiple interfaces.</p>
+     * <p>This method must be called after {@link #start()}. A concrete local bind address is
+     * required so the local BBMD entry is deterministic on multi-homed hosts.</p>
+     *
+     * <p>BACnet4J 6.1.0-beta.2 can act as a BBMD but does not expose a public Java setter for its
+     * BDT. The table is therefore installed using the standard BVLC Write-Broadcast-Distribution-
+     * Table service against the local BBMD socket.</p>
      *
      * @param peers remote BBMD peers; the local BBMD entry is added automatically
      */
@@ -109,42 +115,88 @@ public class BacNetIpClient extends BacNetClientBase {
             throw new IllegalStateException("BBMD mode requires a concrete local bind address");
         }
 
-        List<IpNetwork.BDTEntry> entries = new ArrayList<>();
-        entries.add(new IpNetwork.BDTEntry(localAddress, local.getPort()));
-
+        List<BbmdEntry> entries = new ArrayList<>();
+        entries.add(new BbmdEntry(localAddress, local.getPort()));
         if (peers != null) {
             for (BbmdEntry peer : peers) {
                 if (peer == null) continue;
                 if (localAddress.equals(peer.address) && local.getPort() == peer.port) continue;
-
-                if (peer.distributionMask == null || peer.distributionMask.isEmpty()) {
-                    entries.add(new IpNetwork.BDTEntry(peer.address, peer.port));
-                } else {
-                    entries.add(new IpNetwork.BDTEntry(peer.address, peer.port, peer.distributionMask));
-                }
+                entries.add(peer);
             }
         }
 
         network.enableBBMD();
-        network.writeBDT(entries);
+        writeBroadcastDistributionTable(local, entries);
     }
 
     /**
      * Register this BACnet/IP client as a foreign device in a remote BBMD.
      *
-     * <p>BACnet4J 6.1 registration is failure tolerant and will automatically retry failed
-     * registrations and renew successful registrations.</p>
+     * <p>The registration is renewed automatically by BACnet4J for the requested TTL.</p>
      */
     public void registerAsForeignDevice(String address, int port, int ttlSeconds) {
-        network.registerAsForeignDevice(
-            new InetSocketAddress(address, port),
-            Duration.ofSeconds(ttlSeconds),
-            new IpNetwork.ForeignDeviceRegistrationRetryDelayPolicy() {}
-        );
+        try {
+            network.registerAsForeignDevice(new InetSocketAddress(address, port), ttlSeconds);
+        } catch (BACnetException e) {
+            throw new IllegalStateException("Unable to register as BACnet foreign device", e);
+        }
     }
 
     public void unregisterAsForeignDevice() {
         network.unregisterAsForeignDevice();
+    }
+
+    private void writeBroadcastDistributionTable(InetSocketAddress local, List<BbmdEntry> entries) {
+        byte[] request = new byte[4 + entries.size() * 10];
+        request[0] = (byte) 0x81; // BACnet/IP BVLC
+        request[1] = 0x01;        // Write-Broadcast-Distribution-Table
+        request[2] = (byte) ((request.length >>> 8) & 0xff);
+        request[3] = (byte) (request.length & 0xff);
+
+        int offset = 4;
+        try {
+            for (BbmdEntry entry : entries) {
+                byte[] address = InetAddress.getByName(entry.address).getAddress();
+                if (address.length != 4) {
+                    throw new IllegalArgumentException("BBMD address must be IPv4: " + entry.address);
+                }
+                System.arraycopy(address, 0, request, offset, 4);
+                offset += 4;
+
+                request[offset++] = (byte) ((entry.port >>> 8) & 0xff);
+                request[offset++] = (byte) (entry.port & 0xff);
+
+                String maskText = entry.distributionMask == null || entry.distributionMask.isEmpty()
+                    ? "255.255.255.255" : entry.distributionMask;
+                byte[] mask = InetAddress.getByName(maskText).getAddress();
+                if (mask.length != 4) {
+                    throw new IllegalArgumentException("BBMD distribution mask must be IPv4: " + maskText);
+                }
+                System.arraycopy(mask, 0, request, offset, 4);
+                offset += 4;
+            }
+
+            try (DatagramSocket socket = new DatagramSocket()) {
+                socket.setSoTimeout(3000);
+                socket.send(new DatagramPacket(request, request.length, local));
+
+                byte[] response = new byte[6];
+                DatagramPacket packet = new DatagramPacket(response, response.length);
+                socket.receive(packet);
+
+                if (packet.getLength() < 6 || response[0] != (byte) 0x81 || response[1] != 0x00) {
+                    throw new IllegalStateException("Unexpected BVLC response while writing BDT");
+                }
+
+                int result = ((response[4] & 0xff) << 8) | (response[5] & 0xff);
+                if (result != 0) {
+                    throw new IllegalStateException("BBMD rejected BDT write, BVLC result=0x"
+                        + Integer.toHexString(result));
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to configure BACnet BBMD BDT", e);
+        }
     }
 
     public static final class BbmdEntry {
@@ -157,6 +209,12 @@ public class BacNetIpClient extends BacNetClientBase {
         }
 
         public BbmdEntry(String address, int port, String distributionMask) {
+            if (address == null || address.isEmpty()) {
+                throw new IllegalArgumentException("BBMD address must not be empty");
+            }
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("BBMD port out of range: " + port);
+            }
             this.address = address;
             this.port = port;
             this.distributionMask = distributionMask;

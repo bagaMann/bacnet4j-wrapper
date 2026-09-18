@@ -15,11 +15,15 @@ import com.serotonin.bacnet4j.type.constructed.SequenceOf;
 import com.serotonin.bacnet4j.type.enumerated.PropertyIdentifier;
 import com.serotonin.bacnet4j.type.primitive.ObjectIdentifier;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Filters BACnet COV events for one subscription and forwards COV values.
  */
 final class CovEventAdapter extends DeviceEventAdapter {
+
+    private static final Logger logger = LoggerFactory.getLogger(CovEventAdapter.class);
 
     private final int subscriberProcessIdentifier;
     private final BacNetObject object;
@@ -40,19 +44,29 @@ final class CovEventAdapter extends DeviceEventAdapter {
             return;
         }
 
+        logger.debug(
+            "COV raw notification object={} processId={} initiatingDevice={} monitoredObject={} timeRemaining={} valueCount={}",
+            object, processIdentifier, initiatingDeviceIdentifier, monitoredObjectIdentifier, timeRemaining,
+            listOfValues.size());
+
         Encodable presentValue = null;
         Encodable statusFlags = null;
         Encodable eventState = null;
         Encodable outOfService = null;
         for (PropertyValue propertyValue : listOfValues) {
+            Encodable value = propertyValue.getValue();
+            logger.debug("COV raw property object={} property={} value={} valueClass={}",
+                object, propertyValue.getPropertyIdentifier(), value,
+                value == null ? "null" : value.getClass().getName());
+
             if (PropertyIdentifier.presentValue.equals(propertyValue.getPropertyIdentifier())) {
-                presentValue = propertyValue.getValue();
+                presentValue = value;
             } else if (PropertyIdentifier.statusFlags.equals(propertyValue.getPropertyIdentifier())) {
-                statusFlags = propertyValue.getValue();
+                statusFlags = value;
             } else if (PropertyIdentifier.eventState.equals(propertyValue.getPropertyIdentifier())) {
-                eventState = propertyValue.getValue();
+                eventState = value;
             } else if (PropertyIdentifier.outOfService.equals(propertyValue.getPropertyIdentifier())) {
-                outOfService = propertyValue.getValue();
+                outOfService = value;
             }
         }
 

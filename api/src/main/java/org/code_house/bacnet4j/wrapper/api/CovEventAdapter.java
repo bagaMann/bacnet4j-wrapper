@@ -55,7 +55,7 @@ final class CovEventAdapter extends DeviceEventAdapter {
         Encodable outOfService = null;
         for (PropertyValue propertyValue : listOfValues) {
             Encodable value = propertyValue.getValue();
-            logger.info("COV-RAW-V2 property object={} property={} value={} valueClass={}",
+            logger.debug("COV raw property object={} property={} value={} valueClass={}",
                 object, propertyValue.getPropertyIdentifier(), value,
                 value == null ? "null" : value.getClass().getName());
 

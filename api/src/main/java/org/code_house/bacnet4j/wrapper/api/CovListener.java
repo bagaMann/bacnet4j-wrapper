@@ -37,4 +37,18 @@ public interface CovListener {
     default void onCovStatusFlags(BacNetObject object, Encodable statusFlags, long timeRemaining) {
         // Optional notification component.
     }
+
+    /**
+     * Called when Event_State is included in a COV notification.
+     */
+    default void onCovEventState(BacNetObject object, Encodable eventState, long timeRemaining) {
+        // Optional notification component.
+    }
+
+    /**
+     * Called when Out_Of_Service is included in a COV notification.
+     */
+    default void onCovOutOfService(BacNetObject object, Encodable outOfService, long timeRemaining) {
+        // Optional notification component.
+    }
 }

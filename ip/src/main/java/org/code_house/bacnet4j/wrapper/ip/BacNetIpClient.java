@@ -28,6 +28,10 @@ import com.serotonin.bacnet4j.type.constructed.ReadAccessResult;
 import com.serotonin.bacnet4j.type.constructed.ReadAccessResult.Result;
 import com.serotonin.bacnet4j.type.constructed.SequenceOf;
 import com.serotonin.bacnet4j.type.primitive.OctetString;
+import java.net.InetSocketAddress;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.code_house.bacnet4j.wrapper.api.BacNetClientBase;
 import org.code_house.bacnet4j.wrapper.api.BacNetObject;
 import org.code_house.bacnet4j.wrapper.api.Device;
@@ -40,8 +44,11 @@ import org.code_house.bacnet4j.wrapper.api.Type;
  */
 public class BacNetIpClient extends BacNetClientBase {
 
+    private final IpNetwork network;
+
     public BacNetIpClient(IpNetwork network, int deviceId) {
         super(new LocalDevice(deviceId, new DefaultTransport(network)));
+        this.network = network;
     }
 
     public BacNetIpClient(String ip, String broadcast, int port, int deviceId, boolean reuseAddress) {
@@ -79,6 +86,93 @@ public class BacNetIpClient extends BacNetClientBase {
     public void addNetworkRouter(int network, String ipAddress, int port) {
         OctetString address = IpNetworkUtils.toOctetString(ipAddress, port);
         this.localDevice.getNetwork().getTransport().addNetworkRouter(network, address);
+    }
+
+    /**
+     * Enable BBMD mode and configure its Broadcast Distribution Table.
+     *
+     * <p>This method must be called after {@link #start()}, because BACnet4J resolves the actual
+     * local bind socket during network initialization. A concrete local bind address is required;
+     * wildcard 0.0.0.0 is intentionally rejected so the local BBMD entry is deterministic when a
+     * host has multiple interfaces.</p>
+     *
+     * @param peers remote BBMD peers; the local BBMD entry is added automatically
+     */
+    public void enableBbmd(List<BbmdEntry> peers) {
+        InetSocketAddress local = network.getLocalBindAddress();
+        if (local == null || local.getAddress() == null) {
+            throw new IllegalStateException("BACnet/IP network is not initialized");
+        }
+
+        String localAddress = local.getAddress().getHostAddress();
+        if ("0.0.0.0".equals(localAddress)) {
+            throw new IllegalStateException("BBMD mode requires a concrete local bind address");
+        }
+
+        List<IpNetwork.BDTEntry> entries = new ArrayList<>();
+        entries.add(new IpNetwork.BDTEntry(localAddress, local.getPort()));
+
+        if (peers != null) {
+            for (BbmdEntry peer : peers) {
+                if (peer == null) continue;
+                if (localAddress.equals(peer.address) && local.getPort() == peer.port) continue;
+
+                if (peer.distributionMask == null || peer.distributionMask.isEmpty()) {
+                    entries.add(new IpNetwork.BDTEntry(peer.address, peer.port));
+                } else {
+                    entries.add(new IpNetwork.BDTEntry(peer.address, peer.port, peer.distributionMask));
+                }
+            }
+        }
+
+        network.enableBBMD();
+        network.writeBDT(entries);
+    }
+
+    /**
+     * Register this BACnet/IP client as a foreign device in a remote BBMD.
+     *
+     * <p>BACnet4J 6.1 registration is failure tolerant and will automatically retry failed
+     * registrations and renew successful registrations.</p>
+     */
+    public void registerAsForeignDevice(String address, int port, int ttlSeconds) {
+        network.registerAsForeignDevice(
+            new InetSocketAddress(address, port),
+            Duration.ofSeconds(ttlSeconds),
+            new IpNetwork.ForeignDeviceRegistrationRetryDelayPolicy() {}
+        );
+    }
+
+    public void unregisterAsForeignDevice() {
+        network.unregisterAsForeignDevice();
+    }
+
+    public static final class BbmdEntry {
+        private final String address;
+        private final int port;
+        private final String distributionMask;
+
+        public BbmdEntry(String address, int port) {
+            this(address, port, null);
+        }
+
+        public BbmdEntry(String address, int port, String distributionMask) {
+            this.address = address;
+            this.port = port;
+            this.distributionMask = distributionMask;
+        }
+
+        public String getAddress() {
+            return address;
+        }
+
+        public int getPort() {
+            return port;
+        }
+
+        public String getDistributionMask() {
+            return distributionMask;
+        }
     }
 
     @Override

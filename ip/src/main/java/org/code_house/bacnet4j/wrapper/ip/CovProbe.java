@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.serotonin.bacnet4j.type.constructed.ServicesSupported;
 import org.code_house.bacnet4j.wrapper.api.BacNetClient;
 import org.code_house.bacnet4j.wrapper.api.BacNetObject;
+import org.code_house.bacnet4j.wrapper.api.CovListener;
 import org.code_house.bacnet4j.wrapper.api.CovSubscription;
 import org.code_house.bacnet4j.wrapper.api.Device;
 import org.code_house.bacnet4j.wrapper.api.Type;
@@ -191,12 +192,36 @@ public final class CovProbe {
         System.out.println("Initial Present_Value: " + initialValue);
 
         CountDownLatch notification = new CountDownLatch(1);
-        try (CovSubscription subscription = client.subscribeCov(object, lifetime, false,
-                (changedObject, presentValue, timeRemaining) -> {
+        try (CovSubscription subscription = client.subscribeCov(object, lifetime, false, new CovListener() {
+                @Override
+                public void onCovNotification(BacNetObject changedObject, com.serotonin.bacnet4j.type.Encodable presentValue,
+                        long timeRemaining) {
                     System.out.println("COV: " + changedObject + " Present_Value=" + presentValue
                         + " timeRemaining=" + timeRemaining);
                     notification.countDown();
-                })) {
+                }
+
+                @Override
+                public void onCovStatusFlags(BacNetObject changedObject,
+                        com.serotonin.bacnet4j.type.Encodable statusFlags, long timeRemaining) {
+                    System.out.println("COV: " + changedObject + " Status_Flags=" + statusFlags
+                        + " timeRemaining=" + timeRemaining);
+                }
+
+                @Override
+                public void onCovEventState(BacNetObject changedObject,
+                        com.serotonin.bacnet4j.type.Encodable eventState, long timeRemaining) {
+                    System.out.println("COV: " + changedObject + " Event_State=" + eventState
+                        + " timeRemaining=" + timeRemaining);
+                }
+
+                @Override
+                public void onCovOutOfService(BacNetObject changedObject,
+                        com.serotonin.bacnet4j.type.Encodable outOfService, long timeRemaining) {
+                    System.out.println("COV: " + changedObject + " Out_Of_Service=" + outOfService
+                        + " timeRemaining=" + timeRemaining);
+                }
+            })) {
             System.out.println("COV subscription active: processId=" + subscription.getSubscriberProcessIdentifier()
                 + " lifetime=" + subscription.getLifetime() + " confirmed=" + subscription.isConfirmed());
             boolean received = notification.await(waitSeconds, TimeUnit.SECONDS);

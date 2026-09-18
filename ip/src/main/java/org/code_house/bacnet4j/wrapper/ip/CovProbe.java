@@ -192,7 +192,7 @@ public final class CovProbe {
 
     private static void showProperties(BacNetClient client, int targetDeviceId, Type objectType, int objectInstance) {
         BacNetObject object = findObject(client, targetDeviceId, objectType, objectInstance);
-        System.out.println("Properties for: " + object + " name="" + object.getName() + """);
+        System.out.println("Properties for: " + object + " name=\"" + object.getName() + "\"");
         printProperty(client, object, "status-flags");
         printProperty(client, object, "event-state");
         printProperty(client, object, "out-of-service");

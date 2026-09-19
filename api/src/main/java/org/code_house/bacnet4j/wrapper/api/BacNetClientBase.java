@@ -68,8 +68,19 @@ public abstract class BacNetClientBase implements BacNetClient {
 
     @Override
     public void stop() {
-        executor.shutdown();
-        localDevice.terminate();
+        try {
+            CovSubscriptions.closeAll(this);
+        } catch (BacNetClientException e) {
+            logger.warn("Unable to cancel one or more COV subscriptions during client shutdown", e);
+        } finally {
+            executor.shutdown();
+            localDevice.terminate();
+        }
+    }
+
+    @Override
+    public CovSubscription subscribeCov(BacNetObject object, int lifetime, boolean confirmed, CovListener listener) {
+        return CovSubscriptions.subscribe(this, object, lifetime, confirmed, listener);
     }
 
     @Override

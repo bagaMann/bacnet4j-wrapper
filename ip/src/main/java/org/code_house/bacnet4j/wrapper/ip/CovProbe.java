@@ -8,6 +8,7 @@
  */
 package org.code_house.bacnet4j.wrapper.ip;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Scanner;
@@ -43,17 +44,35 @@ public final class CovProbe {
         String broadcast = args[2];
         int localDeviceId = Integer.parseInt(args[3]);
 
-        boolean specificBind = mode.endsWith("-bind");
-        String operation = specificBind ? mode.substring(0, mode.length() - 5) : mode;
+        boolean bbmdMode = "bbmd".equals(mode);
+        boolean specificBind = bbmdMode || mode.endsWith("-bind");
+        String operation = specificBind && !bbmdMode ? mode.substring(0, mode.length() - 5) : mode;
 
-        BacNetClient client = specificBind
+        BacNetIpClient ipClient = specificBind
             ? new BacNetIpClient(localIp, broadcast, 47808, localDeviceId, true)
             : new BacNetIpClient(broadcast, localDeviceId);
+        BacNetClient client = ipClient;
         client.start();
         try {
             System.out.println("BACnet/IP client started as device " + localDeviceId
                 + " (bind " + (specificBind ? localIp : "0.0.0.0")
                 + ", broadcast " + broadcast + ")");
+
+            if (bbmdMode) {
+                List<BacNetIpClient.BbmdEntry> peers = new ArrayList<>();
+                for (int i = 4; i < args.length; i++) {
+                    String value = args[i];
+                    String[] parts = value.split(":", 2);
+                    String peerAddress = parts[0];
+                    int peerPort = parts.length == 2 ? Integer.parseInt(parts[1]) : 47808;
+                    peers.add(new BacNetIpClient.BbmdEntry(peerAddress, peerPort));
+                }
+
+                ipClient.enableBbmd(localIp, 47808, peers);
+                System.out.println("BBMD enabled: local=" + localIp + ":47808 peers=" + peers.size());
+                discover(client);
+                return;
+            }
 
             switch (operation) {
                 case "discover":
@@ -405,6 +424,7 @@ public final class CovProbe {
 
     private static void usage() {
         System.err.println("Usage:");
+        System.err.println("  CovProbe bbmd <localIp> <broadcast> <localDeviceId> [peerIp[:port] ...]");
         System.err.println("  Add '-bind' to any mode name to bind specifically to <localIp>.");
         System.err.println("  Example: CovProbe discover-bind <localIp> <broadcast> <localDeviceId>");
         System.err.println("  Example: CovProbe cov-bind <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");

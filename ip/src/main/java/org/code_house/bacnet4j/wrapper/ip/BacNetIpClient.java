@@ -129,6 +129,37 @@ public class BacNetIpClient extends BacNetClientBase {
         return (IpNetwork) localDevice.getNetwork();
     }
 
+    /**
+     * Register this BACnet/IP client as a Foreign Device at a remote BBMD.
+     *
+     * <p>After successful registration BACnet broadcasts are sent to the remote BBMD using
+     * Distribute-Broadcast-To-Network and incoming forwarded broadcasts are accepted over
+     * the normal BACnet/IP socket. BACnet4J renews the registration automatically.</p>
+     *
+     * @param address remote BBMD IPv4 address.
+     * @param port remote BBMD UDP port.
+     * @param ttlSeconds foreign-device registration TTL in seconds.
+     */
+    public void registerAsForeignDevice(String address, int port, int ttlSeconds) {
+        validateIpv4(address, "Foreign BBMD address");
+        validatePort(port);
+        if (ttlSeconds < 1) {
+            throw new IllegalArgumentException("Foreign device TTL must be greater than zero");
+        }
+
+        try {
+            network().registerAsForeignDevice(new InetSocketAddress(address, port), ttlSeconds);
+        } catch (com.serotonin.bacnet4j.exception.BACnetException e) {
+            throw new IllegalStateException("Unable to register as BACnet Foreign Device at "
+                + address + ":" + port, e);
+        }
+    }
+
+    public void unregisterAsForeignDevice() {
+        network().unregisterAsForeignDevice();
+    }
+
+
     private void writeBdt(InetSocketAddress localBbmd, List<BbmdEntry> entries) {
         byte[] request = new byte[4 + entries.size() * 10];
         request[0] = (byte) 0x81; // BACnet/IP BVLC

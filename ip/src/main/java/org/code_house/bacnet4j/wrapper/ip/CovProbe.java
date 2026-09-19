@@ -43,17 +43,19 @@ public final class CovProbe {
         String broadcast = args[2];
         int localDeviceId = Integer.parseInt(args[3]);
 
-        // Bind the BACnet/IP socket to the wildcard address. Some BACnet devices, including
-        // the IQ3 used by this probe, answer Who-Is with a directed-broadcast I-Am. A socket
-        // bound only to the interface's unicast address does not receive that datagram on Linux.
-        // The broadcast argument still selects the BACnet/IP network and /24 broadcast target.
-        BacNetClient client = new BacNetIpClient(broadcast, localDeviceId);
+        boolean specificBind = mode.endsWith("-bind");
+        String operation = specificBind ? mode.substring(0, mode.length() - 5) : mode;
+
+        BacNetClient client = specificBind
+            ? new BacNetIpClient(localIp, broadcast, 47808, localDeviceId, true)
+            : new BacNetIpClient(broadcast, localDeviceId);
         client.start();
         try {
             System.out.println("BACnet/IP client started as device " + localDeviceId
-                + " (requested interface " + localIp + ", broadcast " + broadcast + ")");
+                + " (bind " + (specificBind ? localIp : "0.0.0.0")
+                + ", broadcast " + broadcast + ")");
 
-            switch (mode) {
+            switch (operation) {
                 case "discover":
                     requireArgs(args, 4);
                     discover(client);
@@ -403,6 +405,9 @@ public final class CovProbe {
 
     private static void usage() {
         System.err.println("Usage:");
+        System.err.println("  Add '-bind' to any mode name to bind specifically to <localIp>.");
+        System.err.println("  Example: CovProbe discover-bind <localIp> <broadcast> <localDeviceId>");
+        System.err.println("  Example: CovProbe cov-bind <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");
         System.err.println("  CovProbe discover  <localIp> <broadcast> <localDeviceId>");
         System.err.println("  CovProbe services  <localIp> <broadcast> <localDeviceId> <targetDeviceId>");
         System.err.println("  CovProbe objects   <localIp> <broadcast> <localDeviceId> <targetDeviceId>");

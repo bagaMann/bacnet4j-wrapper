@@ -45,8 +45,9 @@ public final class CovProbe {
         int localDeviceId = Integer.parseInt(args[3]);
 
         boolean bbmdMode = "bbmd".equals(mode);
-        boolean specificBind = bbmdMode || mode.endsWith("-bind");
-        String operation = specificBind && !bbmdMode ? mode.substring(0, mode.length() - 5) : mode;
+        boolean foreignMode = "foreign".equals(mode);
+        boolean specificBind = bbmdMode || foreignMode || mode.endsWith("-bind");
+        String operation = specificBind && !bbmdMode && !foreignMode ? mode.substring(0, mode.length() - 5) : mode;
 
         BacNetIpClient ipClient = specificBind
             ? new BacNetIpClient(localIp, broadcast, 47808, localDeviceId, true)
@@ -70,6 +71,24 @@ public final class CovProbe {
 
                 ipClient.enableBbmd(localIp, 47808, peers);
                 System.out.println("BBMD enabled: local=" + localIp + ":47808 peers=" + peers.size());
+                discover(client);
+                return;
+            }
+
+            if (foreignMode) {
+                if (args.length < 5 || args.length > 6) {
+                    usage();
+                    System.exit(2);
+                }
+
+                String[] parts = args[4].split(":", 2);
+                String foreignBbmd = parts[0];
+                int foreignPort = parts.length == 2 ? Integer.parseInt(parts[1]) : 47808;
+                int ttl = args.length == 6 ? Integer.parseInt(args[5]) : 600;
+
+                ipClient.registerAsForeignDevice(foreignBbmd, foreignPort, ttl);
+                System.out.println("Foreign Device registered: local=" + localIp
+                    + ":47808 bbmd=" + foreignBbmd + ":" + foreignPort + " ttl=" + ttl + "s");
                 discover(client);
                 return;
             }
@@ -425,6 +444,7 @@ public final class CovProbe {
     private static void usage() {
         System.err.println("Usage:");
         System.err.println("  CovProbe bbmd <localIp> <broadcast> <localDeviceId> [peerIp[:port] ...]");
+        System.err.println("  CovProbe foreign <localIp> <broadcast> <localDeviceId> <bbmdIp[:port]> [ttlSeconds]");
         System.err.println("  Add '-bind' to any mode name to bind specifically to <localIp>.");
         System.err.println("  Example: CovProbe discover-bind <localIp> <broadcast> <localDeviceId>");
         System.err.println("  Example: CovProbe cov-bind <localIp> <broadcast> <localDeviceId> <targetDeviceId> <objectType> <objectInstance> [lifetimeSeconds] [waitSeconds]");

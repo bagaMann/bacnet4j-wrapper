@@ -1,9 +1,9 @@
 package org.code_house.bacnet4j.wrapper.api;
 
 import com.serotonin.bacnet4j.LocalDevice;
+import com.serotonin.bacnet4j.RemoteDevice;
 import com.serotonin.bacnet4j.ServiceFuture;
 import com.serotonin.bacnet4j.exception.BACnetException;
-import com.serotonin.bacnet4j.exception.ServiceTooBigException;
 import com.serotonin.bacnet4j.service.acknowledgement.ReadPropertyAck;
 import com.serotonin.bacnet4j.service.acknowledgement.ReadPropertyMultipleAck;
 import com.serotonin.bacnet4j.service.confirmed.ReadPropertyMultipleRequest;
@@ -18,6 +18,7 @@ import com.serotonin.bacnet4j.type.constructed.ReadAccessSpecification;
 import com.serotonin.bacnet4j.type.constructed.SequenceOf;
 import com.serotonin.bacnet4j.type.enumerated.ObjectType;
 import com.serotonin.bacnet4j.type.enumerated.PropertyIdentifier;
+import com.serotonin.bacnet4j.type.enumerated.Segmentation;
 import com.serotonin.bacnet4j.type.primitive.ObjectIdentifier;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
 import java.util.ArrayList;
@@ -374,27 +375,26 @@ public abstract class BacNetClientBase implements BacNetClient {
             .map(Priority::getPriority)
             .map(UnsignedInteger::new)
             .orElse(null);
+        if (PropertyIdentifier.weeklySchedule.equals(PropertyIdentifier.forName(property))
+                && bacNetValue instanceof BACnetArray<?>) {
+            BACnetArray<?> schedule = (BACnetArray<?>) bacNetValue;
+            if (schedule.getCount() != 7) {
+                throw new IllegalArgumentException("Weekly schedule must contain seven days");
+            }
+            for (int day = 1; day <= 7; day++) {
+                if (!(schedule.getBase1(day) instanceof DailySchedule)) {
+                    throw new IllegalArgumentException("Weekly schedule contains an invalid day " + day);
+                }
+            }
+            writeWeeklySchedule(object, schedule, bacnetPriority);
+            return;
+        }
         ServiceFuture send = localDevice.send(object.getDevice().getBacNet4jAddress(),
             new WritePropertyRequest(object.getBacNet4jIdentifier(), PropertyIdentifier.forName(property), null, bacNetValue, bacnetPriority)
         );
         try {
             send.get();
         } catch (BACnetException e) {
-            if (e instanceof ServiceTooBigException
-                    && PropertyIdentifier.weeklySchedule.equals(PropertyIdentifier.forName(property))
-                    && bacNetValue instanceof BACnetArray<?>) {
-                BACnetArray<?> schedule = (BACnetArray<?>) bacNetValue;
-                if (schedule.getCount() == 7) {
-                    for (int day = 1; day <= 7; day++) {
-                        if (!(schedule.getBase1(day) instanceof DailySchedule)) {
-                            throw new BacNetClientException("Weekly schedule contains an invalid day " + day, e);
-                        }
-                    }
-                    logger.debug("Weekly schedule for {} exceeds APDU limit; writing days by array index", object);
-                    writeWeeklyScheduleByDay(object, schedule, bacnetPriority);
-                    return;
-                }
-            }
             if (!"Timeout waiting for response.".equals(e.getMessage())) {
                 throw new BacNetClientException("Could not set property value", e);
             }
@@ -402,19 +402,31 @@ public abstract class BacNetClientBase implements BacNetClient {
         }
     }
 
-    private void writeWeeklyScheduleByDay(BacNetObject object, BACnetArray<?> schedule,
+    private void writeWeeklySchedule(BacNetObject object, BACnetArray<?> schedule,
             UnsignedInteger priority) {
-        for (int day = 1; day <= 7; day++) {
-            try {
-                localDevice.send(object.getDevice().getBacNet4jAddress(),
-                    new WritePropertyRequest(object.getBacNet4jIdentifier(), PropertyIdentifier.weeklySchedule,
-                        new UnsignedInteger(day), schedule.getBase1(day), priority)
-                ).get();
-                logger.debug("Weekly schedule for {}: day {} write acknowledged", object, day);
-            } catch (BACnetException e) {
-                throw new BacNetClientException("Could not write weekly schedule day " + day
-                    + " (earlier days may already have been written)", e);
+        try {
+            Device device = object.getDevice();
+            ObjectIdentifier deviceIdentifier = new ObjectIdentifier(ObjectType.device, device.getInstanceNumber());
+            ReadPropertyAck maxApduAck = localDevice.send(device.getBacNet4jAddress(),
+                new ReadPropertyRequest(deviceIdentifier, PropertyIdentifier.maxApduLengthAccepted)).get();
+            ReadPropertyAck segmentationAck = localDevice.send(device.getBacNet4jAddress(),
+                new ReadPropertyRequest(deviceIdentifier, PropertyIdentifier.segmentationSupported)).get();
+            Encodable maxApdu = maxApduAck.getValue();
+            Encodable segmentation = segmentationAck.getValue();
+            if (!(maxApdu instanceof UnsignedInteger) || ((UnsignedInteger) maxApdu).intValue() <= 0
+                    || !(segmentation instanceof Segmentation)) {
+                throw new IllegalArgumentException("Invalid BACnet APDU capabilities for " + device);
             }
+            // Use the configured address and capabilities read from the device, even if discovery has not populated the cache.
+            RemoteDevice remote = new RemoteDevice(localDevice, device.getInstanceNumber(), device.getBacNet4jAddress());
+            remote.setDeviceProperty(PropertyIdentifier.maxApduLengthAccepted, maxApdu);
+            remote.setDeviceProperty(PropertyIdentifier.segmentationSupported, segmentation);
+            logger.debug("Writing complete weekly schedule for {}: maxAPDU={}, segmentation={}", object, maxApdu, segmentation);
+            localDevice.send(remote, new WritePropertyRequest(object.getBacNet4jIdentifier(),
+                PropertyIdentifier.weeklySchedule, null, schedule, priority)).get();
+            logger.debug("Complete weekly schedule for {} write acknowledged", object);
+        } catch (BACnetException e) {
+            throw new BacNetClientException("Could not write complete weekly schedule", e);
         }
     }
 
